@@ -32,7 +32,7 @@ RUN poetry config virtualenvs.in-project true \
 COPY --chown=mediaflow_proxy:mediaflow_proxy . /mediaflow_proxy
 
 # Expose the port dynamically based on environment variable
-EXPOSE ${PORT}
+EXPOSE 8080
 
-# Activate virtual environment and run the application with Gunicorn
-CMD ["poetry", "run", "gunicorn", "mediaflow_proxy.main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:${PORT}", "--timeout", "120", "--max-requests", "500", "--max-requests-jitter", "200", "--access-logfile", "-", "--error-logfile", "-", "--log-level", "info"]
+# Run the application with Gunicorn and Uvicorn, expanding PORT in a shell
+CMD sh -c "poetry run gunicorn mediaflow_proxy.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:${PORT} --timeout 120 --max-requests 500 --max-requests-jitter 200 --access-logfile - --error-logfile - --log-level info"
