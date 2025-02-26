@@ -117,7 +117,7 @@ async def segment_endpoint(
     print(f"DEBUG: Parametri ricevuti: {segment_params}")
 
     # Decodifica l'URL dal parametro `d=`
-    decoded_url = urllib.parse.unquote(segment_params.url)
+    decoded_url = urllib.parse.unquote(segment_params.segment_url)
     print(f"DEBUG: URL effettivo che il proxy sta cercando di raggiungere: {decoded_url}")
 
     # Recupera tutti gli header della richiesta originale, incluso "Range" (se presente)
