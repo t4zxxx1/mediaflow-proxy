@@ -94,33 +94,38 @@ async def playlist_endpoint(
     return await get_playlist(request, playlist_params, proxy_headers)
 
 
-@proxy_router.get("/mpd/segment.mp4")
+@proxy_router.get("/proxy/hls/segment.m4s")
 async def segment_endpoint(
     request: Request,
     segment_params: Annotated[MPDSegmentParams, Query()],
     proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
 ):
     """
-    Retrieves and processes a media segment, decrypting it if necessary.
+    Proxies and streams a media segment, ensuring correct handling of Range requests.
     """
-    # Recupera tutti gli header della richiesta originale, incluso "Range"
+    # Inoltra tutti gli header della richiesta originale, incluso "Range"
     headers = {key: value for key, value in request.headers.items()}
 
     async with httpx.AsyncClient() as client:
         upstream_response = await client.get(segment_params.url, headers=headers, stream=True)
 
-        # Se il server upstream risponde con errore, gestiamolo correttamente
-        if upstream_response.status_code in {400, 404, 416}:
-            raise HTTPException(
-                status_code=upstream_response.status_code,
-                detail=f"Errore dal server upstream: {upstream_response.status_code}",
-            )
+        # Se il server restituisce 404, lo comunichiamo chiaramente
+        if upstream_response.status_code == 404:
+            raise HTTPException(status_code=404, detail="Segmento non trovato nel server upstream")
 
+        # Controlla se il server upstream supporta le richieste Range
+        accept_ranges = upstream_response.headers.get("Accept-Ranges", "none")
+
+        if accept_ranges.lower() == "none":
+            raise HTTPException(status_code=416, detail="Il server upstream non supporta Range")
+
+        # Inoltra il segmento senza modificarlo
         return StreamingResponse(
             upstream_response.aiter_raw(),
             status_code=upstream_response.status_code,
             headers={k: v for k, v in upstream_response.headers.items() if k.lower() != "transfer-encoding"},
         )
+
 
 
 @proxy_router.get("/ip")
