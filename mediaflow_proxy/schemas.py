@@ -26,7 +26,10 @@ class GenerateUrlRequest(BaseModel):
 
 
 class GenericParams(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(
+        populate_by_name=True,
+        extra='allow',  # oppure 'ignore'
+    )
 
 
 class HLSManifestParams(GenericParams):
