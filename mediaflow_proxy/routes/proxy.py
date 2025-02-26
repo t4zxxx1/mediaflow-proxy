@@ -103,17 +103,25 @@ async def segment_endpoint(
     """
     Proxies and streams a media segment, ensuring correct handling of Range requests.
     """
-    # Inoltra tutti gli header della richiesta originale, incluso "Range"
+    # Decodifichiamo correttamente l'URL ricevuto nel parametro `d=`
+    decoded_url = urllib.parse.unquote(segment_params.url)
+
+    # DEBUG: Stampiamo l'URL per verificare che sia corretto
+    print(f"DEBUG: URL richiesto al proxy: {request.url}")
+    print(f"DEBUG: URL effettivo che il proxy sta cercando di raggiungere: {decoded_url}")
+
+    # Recuperiamo tutti gli header della richiesta originale, incluso "Range"
     headers = {key: value for key, value in request.headers.items()}
 
     async with httpx.AsyncClient() as client:
-        upstream_response = await client.get(segment_params.url, headers=headers, stream=True)
+        upstream_response = await client.get(decoded_url, headers=headers, stream=True)
 
-        # Se il server restituisce 404, lo comunichiamo chiaramente
+        # Se il server restituisce 404, stampiamo un errore nei log
         if upstream_response.status_code == 404:
-            raise HTTPException(status_code=404, detail="Segmento non trovato nel server upstream")
+            print(f"DEBUG: Il server upstream non ha trovato il segmento: {decoded_url}")
+            raise HTTPException(status_code=404, detail=f"Segmento non trovato: {decoded_url}")
 
-        # Controlla se il server upstream supporta le richieste Range
+        # Controlliamo se il server upstream supporta Range
         accept_ranges = upstream_response.headers.get("Accept-Ranges", "none")
 
         if accept_ranges.lower() == "none":
