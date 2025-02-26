@@ -1,6 +1,8 @@
 from typing import Annotated
 
 from fastapi import Request, Depends, APIRouter, Query, HTTPException
+from fastapi.responses import StreamingResponse
+import httpx
 
 from mediaflow_proxy.handlers import (
     handle_hls_stream_proxy,
@@ -31,14 +33,6 @@ async def hls_manifest_proxy(
 ):
     """
     Proxify HLS stream requests, fetching and processing the m3u8 playlist or streaming the content.
-
-    Args:
-        request (Request): The incoming HTTP request.
-        hls_params (HLSPlaylistParams): The parameters for the HLS stream request.
-        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
-
-    Returns:
-        Response: The HTTP response with the processed m3u8 playlist or streamed content.
     """
     return await handle_hls_stream_proxy(request, hls_params, proxy_headers)
 
@@ -52,21 +46,28 @@ async def proxy_stream_endpoint(
 ):
     """
     Proxies stream requests to the given video URL.
-
-    Args:
-        request (Request): The incoming HTTP request.
-        stream_params (ProxyStreamParams): The parameters for the stream request.
-        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
-
-    Returns:
-        Response: The HTTP response with the streamed content.
     """
-    content_range = proxy_headers.request.get("range", "bytes=0-")
-    if "nan" in content_range.casefold():
-        # Handle invalid range requests "bytes=NaN-NaN"
-        raise HTTPException(status_code=416, detail="Invalid Range Header")
-    proxy_headers.request.update({"range": content_range})
-    return await proxy_stream(request.method, stream_params, proxy_headers)
+    # Recupera tutti gli header della richiesta originale, incluso "Range"
+    headers = {key: value for key, value in request.headers.items()}
+
+    async with httpx.AsyncClient() as client:
+        upstream_response = await client.request(
+            method=request.method, url=stream_params.url, headers=headers, stream=True
+        )
+
+        # Se il server upstream risponde con errore, gestiamolo correttamente
+        if upstream_response.status_code in {400, 404, 416}:
+            raise HTTPException(
+                status_code=upstream_response.status_code,
+                detail=f"Errore dal server upstream: {upstream_response.status_code}",
+            )
+
+        # Restituisce lo stream direttamente senza modificare il contenuto
+        return StreamingResponse(
+            upstream_response.aiter_raw(),
+            status_code=upstream_response.status_code,
+            headers={k: v for k, v in upstream_response.headers.items() if k.lower() != "transfer-encoding"},
+        )
 
 
 @proxy_router.get("/mpd/manifest.m3u8")
@@ -77,14 +78,6 @@ async def mpd_manifest_proxy(
 ):
     """
     Retrieves and processes the MPD manifest, converting it to an HLS manifest.
-
-    Args:
-        request (Request): The incoming HTTP request.
-        manifest_params (MPDManifestParams): The parameters for the manifest request.
-        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
-
-    Returns:
-        Response: The HTTP response with the HLS manifest.
     """
     return await get_manifest(request, manifest_params, proxy_headers)
 
@@ -97,42 +90,42 @@ async def playlist_endpoint(
 ):
     """
     Retrieves and processes the MPD manifest, converting it to an HLS playlist for a specific profile.
-
-    Args:
-        request (Request): The incoming HTTP request.
-        playlist_params (MPDPlaylistParams): The parameters for the playlist request.
-        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
-
-    Returns:
-        Response: The HTTP response with the HLS playlist.
     """
     return await get_playlist(request, playlist_params, proxy_headers)
 
 
 @proxy_router.get("/mpd/segment.mp4")
 async def segment_endpoint(
+    request: Request,
     segment_params: Annotated[MPDSegmentParams, Query()],
     proxy_headers: Annotated[ProxyRequestHeaders, Depends(get_proxy_headers)],
 ):
     """
     Retrieves and processes a media segment, decrypting it if necessary.
-
-    Args:
-        segment_params (MPDSegmentParams): The parameters for the segment request.
-        proxy_headers (ProxyRequestHeaders): The headers to include in the request.
-
-    Returns:
-        Response: The HTTP response with the processed segment.
     """
-    return await get_segment(segment_params, proxy_headers)
+    # Recupera tutti gli header della richiesta originale, incluso "Range"
+    headers = {key: value for key, value in request.headers.items()}
+
+    async with httpx.AsyncClient() as client:
+        upstream_response = await client.get(segment_params.url, headers=headers, stream=True)
+
+        # Se il server upstream risponde con errore, gestiamolo correttamente
+        if upstream_response.status_code in {400, 404, 416}:
+            raise HTTPException(
+                status_code=upstream_response.status_code,
+                detail=f"Errore dal server upstream: {upstream_response.status_code}",
+            )
+
+        return StreamingResponse(
+            upstream_response.aiter_raw(),
+            status_code=upstream_response.status_code,
+            headers={k: v for k, v in upstream_response.headers.items() if k.lower() != "transfer-encoding"},
+        )
 
 
 @proxy_router.get("/ip")
 async def get_mediaflow_proxy_public_ip():
     """
     Retrieves the public IP address of the MediaFlow proxy server.
-
-    Returns:
-        Response: The HTTP response with the public IP address in the form of a JSON object. {"ip": "xxx.xxx.xxx.xxx"}
     """
     return await get_public_ip()
