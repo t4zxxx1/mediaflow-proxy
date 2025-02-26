@@ -52,31 +52,25 @@ async def proxy_stream_endpoint(
     headers = {key: value for key, value in request.headers.items()}
 
     async with httpx.AsyncClient() as client:
-        # Inoltra esattamente lo stesso metodo (GET o HEAD)
-        upstream_response = await client.request(
-            method=request.method,
-            url=stream_params.url,
-            headers=headers,
-            stream=True
-        )
+        # **Modifica**: Usa client.stream(...) invece di .request(..., stream=True)
+        async with client.stream(request.method, stream_params.url, headers=headers) as upstream_response:
+            # Se il server upstream risponde con un errore "nota" (400, 404, 416), rilancia un HTTPException
+            if upstream_response.status_code in {400, 404, 416}:
+                raise HTTPException(
+                    status_code=upstream_response.status_code,
+                    detail=f"Errore dal server upstream: {upstream_response.status_code}",
+                )
 
-        # Se il server upstream risponde con un errore "nota" (400, 404, 416), rilancia un HTTPException
-        if upstream_response.status_code in {400, 404, 416}:
-            raise HTTPException(
+            # Restituisce lo stream senza modificare il contenuto
+            return StreamingResponse(
+                upstream_response.aiter_raw(),
                 status_code=upstream_response.status_code,
-                detail=f"Errore dal server upstream: {upstream_response.status_code}",
+                headers={
+                    k: v
+                    for k, v in upstream_response.headers.items()
+                    if k.lower() != "transfer-encoding"
+                },
             )
-
-        # Restituisce lo stream senza modificare il contenuto
-        return StreamingResponse(
-            upstream_response.aiter_raw(),
-            status_code=upstream_response.status_code,
-            headers={
-                k: v
-                for k, v in upstream_response.headers.items()
-                if k.lower() != "transfer-encoding"
-            },
-        )
 
 
 @proxy_router.get("/mpd/manifest.m3u8")
@@ -103,7 +97,7 @@ async def playlist_endpoint(
     return await get_playlist(request, playlist_params, proxy_headers)
 
 
-@proxy_router.head("/hls/segment.m4s")  # <--- Rimosso "proxy/" dal decoratore
+@proxy_router.head("/hls/segment.m4s")
 @proxy_router.get("/hls/segment.m4s")
 async def segment_endpoint(
     request: Request,
@@ -116,7 +110,7 @@ async def segment_endpoint(
     # Debug: stampa i parametri
     print(f"DEBUG: Parametri ricevuti: {segment_params}")
 
-    # Decodifica l'URL dal parametro `d=`
+    # Decodifica l'URL dal parametro `segment_url`
     decoded_url = urllib.parse.unquote(segment_params.segment_url)
     print(f"DEBUG: URL effettivo che il proxy sta cercando di raggiungere: {decoded_url}")
 
@@ -124,38 +118,32 @@ async def segment_endpoint(
     headers = {key: value for key, value in request.headers.items()}
 
     async with httpx.AsyncClient() as client:
-        # Usa .request() invece di .get() per riflettere il metodo: GET o HEAD
-        upstream_response = await client.request(
-            method=request.method,
-            url=decoded_url,
-            headers=headers,
-            stream=True,
-        )
+        # **Modifica**: Usa client.stream(...) invece di .request(..., stream=True)
+        async with client.stream(request.method, decoded_url, headers=headers) as upstream_response:
+            # Se il server upstream restituisce 404, segnala l'errore
+            if upstream_response.status_code == 404:
+                print(f"DEBUG: Il server upstream non ha trovato il segmento: {decoded_url}")
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Segmento non trovato: {decoded_url}"
+                )
 
-        # Se il server upstream restituisce 404, segnala l'errore
-        if upstream_response.status_code == 404:
-            print(f"DEBUG: Il server upstream non ha trovato il segmento: {decoded_url}")
-            raise HTTPException(
-                status_code=404,
-                detail=f"Segmento non trovato: {decoded_url}"
+            # (Opzionale) Se vuoi gestire in modo esplicito il caso "Accept-Ranges: none",
+            # puoi gestire qui l'eccezione 416 o ignorarla.
+            #
+            # accept_ranges = upstream_response.headers.get("Accept-Ranges", "none")
+            # if accept_ranges.lower() == "none" and "range" in headers:
+            #     raise HTTPException(status_code=416, detail="Il server upstream non supporta Range")
+
+            return StreamingResponse(
+                upstream_response.aiter_raw(),
+                status_code=upstream_response.status_code,
+                headers={
+                    k: v
+                    for k, v in upstream_response.headers.items()
+                    if k.lower() != "transfer-encoding"
+                },
             )
-
-        # (Opzionale) Se vuoi gestire in modo esplicito il caso "Accept-Ranges: none",
-        # puoi gestire qui l'eccezione 416 o ignorarla.
-        #
-        # accept_ranges = upstream_response.headers.get("Accept-Ranges", "none")
-        # if accept_ranges.lower() == "none" and "range" in headers:
-        #     raise HTTPException(status_code=416, detail="Il server upstream non supporta Range")
-
-        return StreamingResponse(
-            upstream_response.aiter_raw(),
-            status_code=upstream_response.status_code,
-            headers={
-                k: v
-                for k, v in upstream_response.headers.items()
-                if k.lower() != "transfer-encoding"
-            },
-        )
 
 
 @proxy_router.get("/ip")
