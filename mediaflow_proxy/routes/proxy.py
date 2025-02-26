@@ -4,6 +4,7 @@ from fastapi import Request, Depends, APIRouter, Query, HTTPException
 from fastapi.responses import StreamingResponse
 import httpx
 import urllib.parse
+
 from mediaflow_proxy.handlers import (
     handle_hls_stream_proxy,
     proxy_stream,
@@ -102,8 +103,8 @@ async def playlist_endpoint(
     return await get_playlist(request, playlist_params, proxy_headers)
 
 
-@proxy_router.head("/proxy/hls/segment.m4s")
-@proxy_router.get("/proxy/hls/segment.m4s")
+@proxy_router.head("/hls/segment.m4s")  # <--- Rimosso "proxy/" dal decoratore
+@proxy_router.get("/hls/segment.m4s")
 async def segment_endpoint(
     request: Request,
     segment_params: Annotated[MPDSegmentParams, Query()],
@@ -135,16 +136,15 @@ async def segment_endpoint(
         if upstream_response.status_code == 404:
             print(f"DEBUG: Il server upstream non ha trovato il segmento: {decoded_url}")
             raise HTTPException(
-                status_code=404, 
+                status_code=404,
                 detail=f"Segmento non trovato: {decoded_url}"
             )
 
-        # (Opzionale) Se vuoi gestire in modo esplicito il caso "Accept-Ranges: none"
-        # accettando o rifiutando la risposta del server:
+        # (Opzionale) Se vuoi gestire in modo esplicito il caso "Accept-Ranges: none",
+        # puoi gestire qui l'eccezione 416 o ignorarla.
         #
         # accept_ranges = upstream_response.headers.get("Accept-Ranges", "none")
         # if accept_ranges.lower() == "none" and "range" in headers:
-        #     # Il server non supporta Range e stavi facendo una richiesta parziale
         #     raise HTTPException(status_code=416, detail="Il server upstream non supporta Range")
 
         return StreamingResponse(
