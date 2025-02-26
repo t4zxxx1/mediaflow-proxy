@@ -3,7 +3,7 @@ from typing import Annotated
 from fastapi import Request, Depends, APIRouter, Query, HTTPException
 from fastapi.responses import StreamingResponse
 import httpx
-
+import urllib.parse
 from mediaflow_proxy.handlers import (
     handle_hls_stream_proxy,
     proxy_stream,
