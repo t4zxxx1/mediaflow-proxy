@@ -103,11 +103,14 @@ async def segment_endpoint(
     """
     Proxies and streams a media segment, ensuring correct handling of Range requests.
     """
-    # Decodifichiamo correttamente l'URL ricevuto nel parametro `d=`
+
+    # Stampiamo i parametri ricevuti per debug
+    print(f"DEBUG: Parametri ricevuti: {segment_params}")
+
+    # Decodifichiamo l'URL dal parametro `d=`
     decoded_url = urllib.parse.unquote(segment_params.url)
 
-    # DEBUG: Stampiamo l'URL per verificare che sia corretto
-    print(f"DEBUG: URL richiesto al proxy: {request.url}")
+    # Stampiamo l'URL per verificare che sia corretto
     print(f"DEBUG: URL effettivo che il proxy sta cercando di raggiungere: {decoded_url}")
 
     # Recuperiamo tutti gli header della richiesta originale, incluso "Range"
@@ -133,7 +136,6 @@ async def segment_endpoint(
             status_code=upstream_response.status_code,
             headers={k: v for k, v in upstream_response.headers.items() if k.lower() != "transfer-encoding"},
         )
-
 
 
 @proxy_router.get("/ip")
